@@ -1,0 +1,6 @@
+node_modules/
+.env*
+.openai/
+.playwright-mcp/
+test-results/
+*.tar.gz

@@ -28,7 +28,7 @@ jobs:
         with:
           node-version: "24"
       - name: Run regression tests
-        run: node --test tests/core.test.mjs tests/ocr-run.test.mjs tests/pdf-layout.test.mjs
+        run: node --test tests/core.test.mjs tests/ocr-run.test.mjs tests/ocr-image.test.mjs tests/pdf-layout.test.mjs
       - name: Prepare static app
         run: node scripts/build-pages.mjs
       - name: Configure Pages

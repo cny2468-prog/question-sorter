@@ -1,6 +1,7 @@
-import {parseTSV,inferTitle,splitQuestions,duplicatePairs,groupedQuestions,clampBox,repairAutomaticDuplicates} from './core.mjs';
+import {inferTitle,splitQuestions,duplicatePairs,groupedQuestions,clampBox,repairAutomaticDuplicates} from './core.mjs';
 import {loadImage,cropCanvas,download,downloadGroups} from './exports.mjs';
 import {createOcrRun} from './ocr-run.mjs';
+import {recognizeOrientedPhoto,recognizeRegion,rotatePhoto} from './ocr-image.mjs';
 const $=s=>document.querySelector(s), $$=s=>[...document.querySelectorAll(s)];
 const escapeHTML=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const uid=()=>crypto.randomUUID();
@@ -14,12 +15,13 @@ function confirmAction(title,message){return new Promise(resolve=>{const d=$('#c
 function showTab(next){tab=next;for(const name of ['upload','review','export']){$(`#${name}-view`).hidden=name!==tab;$$(`[data-tab="${name}"]`).forEach(b=>b.classList.toggle('active',name===tab));$(`[data-step="${name}"]`).classList.toggle('current',name===tab);}const labels={upload:['문제 모으기','사진 속 문제를, 깔끔하게 모으세요.','원본 문제는 그대로. 겹치는 문제는 한 번만, 제목별로 정리해요.'],review:['문제 검토','원본과 비교하며, 한 번 더 확인해요.','문제 영역과 인식 제목을 확인하고 중복 후보를 정리해주세요.'],export:['파일 저장','제목별로 모인 문제, 파일로 저장하세요.','검토한 문제를 원본 모양 그대로 또는 인식 텍스트로 저장해요.']};$('#breadcrumb').textContent=labels[tab][0];$('#page-title').textContent=labels[tab][1];$('#page-description').textContent=labels[tab][2];render();window.scrollTo({top:0,behavior:'instant'});}
 $$('[data-tab]').forEach(b=>b.addEventListener('click',()=>showTab(b.dataset.tab)));
 $('#go-export').onclick=()=>showTab('export');
-function photoRows(){return state.photos.map(p=>`<div class="photo-row"><img src="${p.data}" alt="${escapeHTML(p.name)} 미리보기"><div class="photo-details"><strong>${escapeHTML(p.name)}</strong><small>${p.width} × ${p.height} · ${p.sample?'예시 사진 · ':''}${(p.bytes/1024/1024).toFixed(1)} MB</small></div><select data-layout="${p.id}" aria-label="${escapeHTML(p.name)} 문제 배치"><option value="auto" ${p.layout==='auto'?'selected':''}>자동 배치</option><option value="one" ${p.layout==='one'?'selected':''}>1단 문제지</option><option value="two" ${p.layout==='two'?'selected':''}>2단 문제지</option></select><span class="photo-status">${p.status==='done'?'인식 완료':p.status==='error'?'다시 시도':'인식 대기'}</span><button class="icon-button" data-remove="${p.id}" aria-label="${escapeHTML(p.name)} 삭제">×</button></div>`).join('');}
+function photoRows(){return state.photos.map(p=>`<div class="photo-row"><img src="${p.data}" alt="${escapeHTML(p.name)} 미리보기"><div class="photo-details"><strong>${escapeHTML(p.name)}</strong><small>${p.width} × ${p.height} · ${p.sample?'예시 사진 · ':''}${(p.bytes/1024/1024).toFixed(1)} MB${p.rotation?' · 방향 보정됨':''}</small>${p.error?`<small class="photo-error">${escapeHTML(p.error)}</small>`:''}</div><div class="photo-controls"><select data-layout="${p.id}" aria-label="${escapeHTML(p.name)} 문제 배치"><option value="auto" ${p.layout==='auto'?'selected':''}>자동 배치</option><option value="one" ${p.layout==='one'?'selected':''}>1단 문제지</option><option value="two" ${p.layout==='two'?'selected':''}>2단 문제지</option></select><button class="text-button" data-rotate="${p.id}" aria-label="${escapeHTML(p.name)} 오른쪽으로 90도 회전">↻ 회전</button><button class="text-button" data-retry="${p.id}" aria-label="${escapeHTML(p.name)} 다시 인식">다시 인식</button></div><span class="photo-status">${p.status==='done'?'인식 완료':p.status==='error'?'다시 시도':'인식 대기'}</span><button class="icon-button" data-remove="${p.id}" aria-label="${escapeHTML(p.name)} 삭제">×</button></div>`).join('');}
 function render(){
   const promoted=repairAutomaticDuplicates(state.questions);
   $('#photo-count').textContent=state.photos.length;$('#nav-count').textContent=state.questions.filter(q=>!q.excluded).length;
   $('#photo-list').innerHTML=state.photos.length?photoRows():'<div class="empty-queue"><span>▧</span><p>추가한 사진이 여기에 표시돼요.</p></div>';
   const pending=state.photos.filter(p=>p.status!=='done').length;$('#analyze').disabled=!pending||busy;$('#analyze').innerHTML=pending?`사진 ${pending}장 문제 인식 <span>→</span>`:'문제 인식 완료 <span>✓</span>';
+  $('#reanalyze-all').hidden=!state.photos.some(p=>p.status==='done');$('#reanalyze-all').disabled=busy;
   if(!state.photos.length)$('#analyze').innerHTML='문제 인식 시작 <span>→</span>';
   $('#queue-help').textContent=state.photos.length?`${state.photos.length}장 추가됨 · ${pending}장 인식 대기`:'제목이 보이고 글자가 선명한 사진을 준비해주세요.';
   if(tab==='review')renderReview();if(tab==='export')renderExport();
@@ -44,28 +46,38 @@ for(const event of ['dragenter','dragover'])$('#dropzone').addEventListener(even
 for(const event of ['dragleave','drop'])$('#dropzone').addEventListener(event,e=>{e.preventDefault();$('#dropzone').classList.remove('dragover');});
 $('#dropzone').addEventListener('drop',e=>addFiles([...e.dataTransfer.files]));
 $('#photo-list').addEventListener('change',async e=>{const p=state.photos.find(p=>p.id===e.target.dataset.layout);if(!p)return;p.layout=e.target.value;if(p.status==='done'){p.status='pending';state.questions=state.questions.filter(q=>q.photoId!==p.id);toast('배치를 변경했어요. 이 사진을 다시 인식해주세요.');}render();persist();});
-$('#photo-list').addEventListener('click',async e=>{const button=e.target.closest('[data-remove]');if(!button)return;const id=button.dataset.remove;const q=state.questions.filter(q=>q.photoId===id);if(q.length&&!await confirmAction('사진을 삭제할까요?','이 사진에서 인식한 문제도 작업에서 삭제됩니다.'))return;state.photos=state.photos.filter(p=>p.id!==id);state.questions=state.questions.filter(q=>q.photoId!==id);render();persist();});
+$('#photo-list').addEventListener('click',async e=>{
+  if(busy)return;const button=e.target.closest('[data-remove],[data-rotate],[data-retry]');if(!button)return;
+  const id=button.dataset.remove||button.dataset.rotate||button.dataset.retry,p=state.photos.find(p=>p.id===id);if(!p)return;
+  const q=state.questions.filter(q=>q.photoId===id);
+  if(button.dataset.retry){if(q.length&&!await confirmAction('이 사진을 다시 인식할까요?','다시 인식에 성공하면 이 사진의 기존 텍스트와 검토 내용을 새 결과로 바꿉니다.'))return;p.status='pending';delete p.error;render();persist();$('#analyze').click();return;}
+  if(button.dataset.rotate){if(q.length&&!await confirmAction('사진을 회전할까요?','이 사진의 기존 문제 영역과 텍스트를 지우고 회전합니다. 회전 후 다시 인식해주세요.'))return;try{Object.assign(p,await rotatePhoto(p,90),{status:'pending'});delete p.error;state.questions=state.questions.filter(q=>q.photoId!==id);render();persist();toast('사진을 오른쪽으로 90도 돌렸어요. 문제 인식을 시작해주세요.');}catch{toast('사진을 회전하지 못했어요. 다시 시도해주세요.');}return;}
+  if(q.length&&!await confirmAction('사진을 삭제할까요?','이 사진에서 인식한 문제도 작업에서 삭제됩니다.'))return;state.photos=state.photos.filter(p=>p.id!==id);state.questions=state.questions.filter(q=>q.photoId!==id);render();persist();
+});
+$('#reanalyze-all').onclick=async()=>{if(busy||!state.photos.length)return;if(!await confirmAction('전체 사진을 다시 인식할까요?','방향을 자동으로 확인해 다시 읽습니다. 성공한 사진의 기존 텍스트와 검토 내용이 새 결과로 바뀝니다.'))return;for(const p of state.photos){p.status='pending';delete p.error;}render();persist();$('#analyze').click();};
 function setProgress(message,value){$('#progress-label').textContent=message;$('#progress-bar').value=value;}
 $('#cancel-ocr').onclick=()=>{if(activeRun)void activeRun.cancel();};
 $('#progress-dialog').addEventListener('cancel',e=>e.preventDefault());
-async function recognize(photo,run){
-  const {data}=await run.wait(()=>run.worker.recognize(photo.data,{}, {text:true,tsv:true}));run.ensureActive();
-  let lines=parseTSV(data.tsv);const titleInfo=inferTitle(lines,photo.width,photo.height,photo.name.replace(/\.[^.]+$/,''));
+async function recognize(original,run,report){
+  run.orientationHints??=new Map();const orientationKey=original.width>original.height?'landscape':'portrait';
+  const prepared=await recognizeOrientedPhoto(original,run,report,run.orientationHints.get(orientationKey)||0);run.ensureActive();const photo=prepared.photo;
+  let lines=prepared.lines;const titleInfo=inferTitle(lines,photo.width,photo.height,photo.name.replace(/\.[^.]+$/,''));
   const anchors=lines.filter(l=>/^\s*(?:\[\d+\]|\d+[.)．。]|\d+\s*번)/.test(l.text));
   const left=anchors.some(l=>l.x<photo.width*.27),right=anchors.some(l=>l.x>photo.width*.43&&l.x<photo.width*.7);
   const two=photo.layout==='two'||(photo.layout==='auto'&&((left&&right)||await hasTwoColumns(photo)));
   let segments=[];
   if(two){const top=Math.max(0,Math.floor(anchors.length?Math.min(...anchors.map(a=>a.y))-14:photo.height*.16));
     for(let col=0;col<2;col++){const x=col?Math.floor(photo.width/2):0,w=col?photo.width-x:Math.floor(photo.width/2),h=photo.height-top;
-      const canvas=await cropCanvas(photo,{x,y:top,w,h});const result=await run.wait(()=>run.worker.recognize(canvas,{}, {text:true,tsv:true}));
-      run.ensureActive();const columnLines=parseTSV(result.data.tsv,x,top);segments.push(...splitQuestions(columnLines,photo.width,photo.height,{x,y:top,w,h}));}
+      const canvas=await cropCanvas(photo,{x,y:top,w,h});const regionLines=await recognizeRegion(canvas,run);
+      run.ensureActive();const columnLines=regionLines.map(line=>({...line,x:line.x+x,y:line.y+top}));segments.push(...splitQuestions(columnLines,photo.width,photo.height,{x,y:top,w,h}));}
   }else segments=splitQuestions(lines,photo.width,photo.height);
-  if(!segments.length){segments=[{text:'',box:{x:0,y:0,w:photo.width,h:photo.height},confidence:0,needsBounds:true}];}
+  if(!segments.length)segments=splitQuestions(lines,photo.width,photo.height);
+  if(!segments.some(segment=>segment.text.trim()))throw new Error('문제 본문의 글자를 읽지 못했어요. 사진 방향과 배치를 확인해주세요.');
   const output=[];
   for(const segment of segments){run.ensureActive();const box=clampBox(segment.box,photo.width,photo.height);const crop=await cropCanvas(photo,box);const imageData=crop.getContext('2d').getImageData(0,0,crop.width,crop.height);const cropHash=await hashBytes(imageData.data);run.ensureActive();
-    const identical=[...state.questions,...output].find(q=>q.cropHash===cropHash&&!q.excluded);
+    const identical=[...state.questions.filter(q=>q.photoId!==photo.id),...output].find(q=>q.cropHash===cropHash&&!q.excluded);
     output.push({id:uid(),photoId:photo.id,title:titleInfo.title,text:segment.text,box,crop:crop.toDataURL('image/jpeg',.91),cropHash,confidence:segment.confidence,needsBounds:segment.needsBounds,titleInferred:titleInfo.inferred,reviewed:false,excluded:!!identical,autoDuplicate:identical?.id||null,distinctFrom:[]});}
-  run.ensureActive();photo.title=titleInfo.title;return output;
+  run.ensureActive();Object.assign(original,photo,{title:titleInfo.title,ocrVersion:2});delete original.error;run.orientationHints.set(orientationKey,prepared.angle);return output;
 }
 async function hasTwoColumns(photo){
   const img=await loadImage(photo.data),canvas=document.createElement('canvas');canvas.width=600;canvas.height=Math.round(photo.height/photo.width*600);const ctx=canvas.getContext('2d');ctx.drawImage(img,0,0,canvas.width,canvas.height);const pixels=ctx.getImageData(0,0,canvas.width,canvas.height).data;
@@ -77,8 +89,8 @@ $('#analyze').onclick=async()=>{
   let current=0,success=0;const failures=[];
   try{
     await run.wait(()=>window.Tesseract.createWorker('kor',1,{workerPath:new URL('./vendor/worker.min.js',location.href).href,corePath:new URL('./vendor/core/',location.href).href,langPath:new URL('./vendor/lang',location.href).href,workerBlobURL:false,cacheMethod:'none',logger:m=>{if(activeRun===run&&!run.cancelled&&m.status==='recognizing text')setProgress(`${current+1} / ${photos.length} · ${photos[current]?.name} · 글자 인식 ${Math.round(m.progress*100)}%`,Math.min(98,(current+m.progress*.9)/photos.length*100));}}).then(created=>run.attachWorker(created)));
-    await run.wait(()=>run.worker.setParameters({tessedit_pageseg_mode:'6',preserve_interword_spaces:'0',user_defined_dpi:'300'}));
-    for(current=0;current<photos.length;current++){run.ensureActive();const p=photos[current];try{setProgress(`${current+1} / ${photos.length} · ${p.name} 문제 영역을 나누고 있어요.`,current/photos.length*100);const questions=await run.wait(()=>recognize(p,run));run.ensureActive();state.questions.push(...questions);p.status='done';success++;persist();}catch(err){if(run.cancelled)break;p.status='error';failures.push(p.name);}}
+    await run.wait(()=>run.worker.setParameters({tessedit_pageseg_mode:'3',preserve_interword_spaces:'0',user_defined_dpi:'300'}));
+    for(current=0;current<photos.length;current++){run.ensureActive();const p=photos[current];try{setProgress(`${current+1} / ${photos.length} · ${p.name} 문제 영역을 나누고 있어요.`,current/photos.length*100);const questions=await run.wait(()=>recognize(p,run,message=>setProgress(`${current+1} / ${photos.length} · ${p.name} · ${message}`,current/photos.length*100)));run.ensureActive();state.questions=state.questions.filter(q=>q.photoId!==p.id);state.questions.push(...questions);p.status='done';success++;persist();}catch(err){if(run.cancelled)break;p.status='error';p.error=err.message||'글자를 읽지 못했어요. 다시 인식해주세요.';failures.push(p.name);}}
   }catch(err){if(!run.cancelled){toast('인식 도구를 준비하지 못했어요. 페이지를 새로고침하고 다시 시도해주세요.');console.error('OCR initialization:',err?.message);}}
   finally{
     await run.dispose();

@@ -1,6 +1,7 @@
-export const questionStart = text => /^\s*(?:\[\s*\d{1,3}\s*\]|\d{1,3}\s*[.)．。]|\d{1,3}\s*번\s*[.)]?)/u.test(text);
+const questionNumberPrefix=/^\s*[|｜│┃]?\s*(?:\[\s*\d{1,3}\s*\]|\d{1,3}\s*[.)．。]|\d{1,3}\s*번\s*[.)]?)/u;
+export const questionStart = text => questionNumberPrefix.test(text);
 export function normalizedText(text) {
-  return text.normalize('NFKC').replace(/^\s*(?:\[\s*\d{1,3}\s*\]|\d{1,3}\s*[.)．。]|\d{1,3}\s*번\s*[.)]?)/u, '').replace(/\s+/gu, '').toLocaleLowerCase();
+  return text.normalize('NFKC').replace(questionNumberPrefix, '').replace(/\s+/gu, '').toLocaleLowerCase();
 }
 export function normalizedTitle(text) { return text.normalize('NFKC').replace(/\s+/gu, '').toLocaleLowerCase(); }
 export function safeName(text) { return (text.replace(/[<>:"/\\|?*\u0000-\u001f]/g, '_').replace(/[. ]+$/g, '').slice(0, 90) || '제목 미확인'); }
@@ -33,7 +34,7 @@ export function splitQuestions(lines, width, height, region = {x:0,y:0,w:width,h
   if (!lines.length) return [];
   let anchors = lines.filter(l=>questionStart(l.text) && l.x < region.x+region.w*.32 && (l.text.match(/(?:^|\s)\(?\d{1,2}\)/g)||[]).length<2);
   // OCR can read circled option numbers as "3)"; prefer the page's dotted question numbering.
-  if(anchors.some(l=>/^\s*\d{1,3}\s*[.．。]/.test(l.text))) anchors=anchors.filter(l=>!/^\s*\d{1,3}\s*\)/.test(l.text));
+  if(anchors.some(l=>/^\s*[|｜│┃]?\s*\d{1,3}\s*[.．。]/.test(l.text))) anchors=anchors.filter(l=>!/^\s*[|｜│┃]?\s*\d{1,3}\s*\)/.test(l.text));
   if (!anchors.length) return [{text:lines.map(l=>l.text).join('\n'), box:{...region}, confidence:Math.round(lines.reduce((s,l)=>s+l.confidence,0)/lines.length), needsBounds:true}];
   return anchors.map((anchor,i)=> {
     const y = Math.max(region.y, anchor.y-12);

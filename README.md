@@ -50,6 +50,6 @@ npm test
 npm audit --omit=dev
 ```
 
-자동 테스트 20개는 문제 번호·선택지 구분, 수치와 수식 보존, 제목별 묶기, 짧은 문항 비교, 자동 제외 사본 복구, 인식 중단·재시도 시 작업 격리, OCR 실패 판정·확대 좌표 복원, PDF 문제·파일명 동시 배치를 확인합니다. 브라우저 확인 기록은 `VERIFICATION.md`를 참조하세요.
+자동 테스트 23개는 문제 번호·선택지·테두리 구분, 수치와 수식 보존, 제목별 묶기, 짧은 문항 비교, 자동 제외 사본 복구, 인식 중단·재시도 시 작업 격리, OCR 실패 판정·확대 좌표 복원·방향 판단, PDF 문제·파일명 동시 배치를 확인합니다. 브라우저 확인 기록은 `VERIFICATION.md`를 참조하세요.
 
 OCR API와 로컬 모델 경로는 [Tesseract.js 공식 문서](https://github.com/naptha/tesseract.js/blob/master/docs/api.md)를 따릅니다. 한글 모델은 [tessdata_best](https://github.com/tesseract-ocr/tessdata_best), 영문 모델은 Project Naptha의 fast 모델입니다. 문서 생성은 docx, jsPDF, fflate를 사용하며 라이선스는 `dist/vendor/THIRD-PARTY-NOTICES.txt`에 정리합니다.

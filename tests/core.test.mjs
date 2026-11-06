@@ -1,6 +1,14 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {normalizedText,questionStart,duplicatePairs,splitQuestions,groupedQuestions,parseTSV,inferTitle,clampBox,repairAutomaticDuplicates} from '../dist/core.mjs';
+
+test('문제 번호 앞에 시험지 테두리가 읽혀도 4·5번을 앞 문항에 합치지 않는다',()=>{
+  const texts=['1. 측정 원리를 설명하시오.','2. 근적외광을 사용하는 이유를 설명하시오.','3. 측정 물리량을 설명하시오.','| 4. 장점과 단점을 설명하시오.','| 5. 전두엽의 기능을 설명하시오.'];
+  const lines=texts.map((text,i)=>({text,x:100,y:100+i*100,w:700,h:30,confidence:90}));
+  assert.ok(texts.every(questionStart));
+  assert.equal(splitQuestions(lines,1000,800).length,5);
+  assert.equal(normalizedText('| 4. 측정 원리를 설명하시오.'),normalizedText('1. 측정 원리를 설명하시오.'));
+});
 test('문제 번호만 제외하고 수치·수식·보기는 유지한다',()=>{
   assert.equal(normalizedText('1. x + 2 = 5\n① 3 ② 7'),normalizedText('12. x + 2 = 5 ① 3 ② 7'));
   assert.notEqual(normalizedText('1. x + 2 = 5'),normalizedText('1. x - 2 = 5'));

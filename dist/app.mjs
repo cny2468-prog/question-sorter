@@ -1,4 +1,4 @@
-import {inferTitle,splitQuestions,duplicatePairs,groupedQuestions,clampBox,repairAutomaticDuplicates} from './core.mjs';
+import {inferTitle,splitQuestions,duplicatePairs,groupedQuestions,clampBox,repairAutomaticDuplicates,questionStart} from './core.mjs';
 import {loadImage,cropCanvas,download,downloadGroups} from './exports.mjs';
 import {createOcrRun} from './ocr-run.mjs';
 import {recognizeOrientedPhoto,recognizeRegion,rotatePhoto} from './ocr-image.mjs';
@@ -62,7 +62,7 @@ async function recognize(original,run,report){
   run.orientationHints??=new Map();const orientationKey=original.width>original.height?'landscape':'portrait';
   const prepared=await recognizeOrientedPhoto(original,run,report,run.orientationHints.get(orientationKey)||0);run.ensureActive();const photo=prepared.photo;
   let lines=prepared.lines;const titleInfo=inferTitle(lines,photo.width,photo.height,photo.name.replace(/\.[^.]+$/,''));
-  const anchors=lines.filter(l=>/^\s*(?:\[\d+\]|\d+[.)．。]|\d+\s*번)/.test(l.text));
+  const anchors=lines.filter(l=>questionStart(l.text));
   const left=anchors.some(l=>l.x<photo.width*.27),right=anchors.some(l=>l.x>photo.width*.43&&l.x<photo.width*.7);
   const two=photo.layout==='two'||(photo.layout==='auto'&&((left&&right)||await hasTwoColumns(photo)));
   let segments=[];
